@@ -159,10 +159,17 @@ def video_chain(src_w, src_h, mode, crop_x):
     cover = (f"scale=w='if(gt(a,{W}/{H}),-2,{W})':h='if(gt(a,{W}/{H}),{H},-2)',"
              f"crop={W}:{H}:x='(iw-{W})*{crop_x}':y='(ih-{H})/2'")
     if mode == "auto":
-        # sursă deja verticală → umple; orizontală → crop pe vorbitor
-        mode = "crop"
+        # orizontală la rezoluție mică → pătrat (un crop 9:16 ar fi mărit de 5x și neclar);
+        # altfel crop vertical pe vorbitor
+        mode = "square" if (src_w > src_h and src_h < 900) else "crop"
     if mode == "crop":
         return f"[vc]{cover},setsar=1[vr]"
+    if mode == "square":
+        # pătrat ih×ih pe vorbitor, mărit la 1080×1080, peste fundal estompat;
+        # titlul stă deasupra pătratului, subtitrările dedesubt
+        return (f"[vc]split[bgs][fgs];[bgs]{cover},gblur=sigma=40,eq=brightness=-0.15[bg];"
+                f"[fgs]crop=ih:ih:x='(iw-ih)*{crop_x}':y=0,scale={W}:{W}:flags=lanczos,"
+                f"unsharp=5:5:0.6[fg];[bg][fg]overlay=0:(H-h)/2,setsar=1[vr]")
     # blur: fundal estompat + imaginea întreagă la mijloc
     return (f"[vc]split[bgs][fgs];[bgs]{cover},gblur=sigma=40,eq=brightness=-0.08[bg];"
             f"[fgs]scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[vr]")
@@ -229,7 +236,7 @@ def main():
     ap.add_argument("transcript")
     ap.add_argument("clips")
     ap.add_argument("out_dir")
-    ap.add_argument("--reframe", choices=["auto", "crop", "blur"], default="auto")
+    ap.add_argument("--reframe", choices=["auto", "crop", "blur", "square"], default="auto")
     ap.add_argument("--crop-x", type=float, default=0.5)
     ap.add_argument("--gap", type=float, default=0.45, help="pauzele mai lungi de atât se taie (s)")
     ap.add_argument("--pad", type=float, default=0.12, help="aer lăsat în jurul vorbirii (s)")
@@ -237,7 +244,7 @@ def main():
     ap.add_argument("--no-hook", action="store_true")
     ap.add_argument("--font", default="DejaVu Sans")
     ap.add_argument("--font-size", type=int, default=88)
-    ap.add_argument("--margin-v", type=int, default=560)
+    ap.add_argument("--margin-v", type=int, default=None, help="implicit 560; 300 în modul square (sub pătrat)")
     ap.add_argument("--words-per-line", type=int, default=3)
     ap.add_argument("--max-chars", type=int, default=18)
     ap.add_argument("--highlight", default="&H0000E6FF&", help="culoare ASS &HBBGGRR& (implicit galben)")
@@ -256,6 +263,9 @@ def main():
         fixes, clips = clips.get("fixes", {}), clips["clips"]
     os.makedirs(a.out_dir, exist_ok=True)
     src_w, src_h, _ = probe(a.video)
+    if a.margin_v is None:
+        square = a.reframe == "square" or (a.reframe == "auto" and src_w > src_h and src_h < 900)
+        a.margin_v = 300 if square else 560
 
     report = []
     for clip in clips:
