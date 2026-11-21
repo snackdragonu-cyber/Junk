@@ -19,6 +19,7 @@ import subprocess
 import sys
 
 W, H = 1080, 1920
+CEDILLA = str.maketrans("şţŞŢ", "șțȘȚ")
 PUNCT_END = re.compile(r"[.!?…;:]$")
 
 
@@ -37,8 +38,23 @@ def words_in(transcript, start, end):
     for seg in transcript["segments"]:
         for w in seg["words"]:
             if w["start"] >= start - 0.05 and w["end"] <= end + 0.05:
-                ws.append(dict(w))
+                w = dict(w)
+                # Whisper scrie uneori ş/ţ cu sedilă; forma corectă în română e cu virgulă
+                w["word"] = w["word"].translate(CEDILLA)
+                ws.append(w)
     return ws
+
+
+def merge_hyphens(words):
+    """Whisper desparte uneori formele cu cratimă („n” + „-au”); le lipim la loc."""
+    out = []
+    for w in words:
+        if out and (w["word"].startswith("-") or out[-1]["word"].endswith("-")):
+            out[-1] = {"start": out[-1]["start"], "end": w["end"],
+                       "word": out[-1]["word"] + w["word"]}
+        else:
+            out.append(w)
+    return out
 
 
 def keep_ranges(words, clip_start, clip_end, gap, pad, jumpcut):
@@ -191,7 +207,7 @@ def apply_fixes(words, fixes):
 def render_clip(video, src_w, src_h, transcript, clip, out_dir, a, fixes=None):
     cid = int(clip.get("id", 1))
     words = words_in(transcript, clip["start"], clip["end"])
-    words = apply_fixes(words, {**(fixes or {}), **clip.get("fixes", {})})
+    words = apply_fixes(merge_hyphens(words), {**(fixes or {}), **clip.get("fixes", {})})
     ranges = keep_ranges(words, clip["start"], clip["end"], a.gap, a.pad, not a.no_jumpcut)
     new_words, total = remap(words, ranges)
 
@@ -244,7 +260,7 @@ def main():
     ap.add_argument("--no-hook", action="store_true")
     ap.add_argument("--font", default="DejaVu Sans")
     ap.add_argument("--font-size", type=int, default=88)
-    ap.add_argument("--margin-v", type=int, default=None, help="implicit 560; 300 în modul square (sub pătrat)")
+    ap.add_argument("--margin-v", type=int, default=None, help="implicit 560; 250 în modul square (sub pătrat)")
     ap.add_argument("--words-per-line", type=int, default=3)
     ap.add_argument("--max-chars", type=int, default=18)
     ap.add_argument("--highlight", default="&H0000E6FF&", help="culoare ASS &HBBGGRR& (implicit galben)")
@@ -265,7 +281,7 @@ def main():
     src_w, src_h, _ = probe(a.video)
     if a.margin_v is None:
         square = a.reframe == "square" or (a.reframe == "auto" and src_w > src_h and src_h < 900)
-        a.margin_v = 300 if square else 560
+        a.margin_v = 250 if square else 560
 
     report = []
     for clip in clips:

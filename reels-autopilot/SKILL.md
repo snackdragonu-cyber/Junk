@@ -50,11 +50,13 @@ python3 $SKILL_DIR/scripts/transcribe.py sursa.mp4 work/ --model small --languag
 Rezultatul: `work/transcript.json` (cuvinte cu timpi) și `work/transcript.txt` (de citit). Modelul `small` procesează cam 3× mai repede decât timpul real pe 4 nuclee. Pentru video de peste 20 de minute rulează-l în fundal (`run_in_background`) și așteaptă notificarea. Folosește `--model medium` dacă audio-ul e zgomotos sau vorbitorul are accent puternic.
 
 ### A2. Alegerea momentelor (partea ta de judecată)
-Citește `work/transcript.txt` și alege clipurile. Un moment bun:
+Citește `work/transcript.txt` și alege clipurile. La video de peste o oră, unește întâi segmentele în blocuri de ~45 s, câte un bloc pe rând, ca să parcurgi mai repede. Sari peste intro, sponsori și reclame. Un moment bun:
 - **începe direct cu cârligul**: o afirmație surprinzătoare, o întrebare, o cifră, o emoție. Nu cu „deci”, „și”, salutări sau context. Primele 2 secunde decid dacă omul derulează mai departe;
 - **se înțelege singur**, fără ce s-a spus înainte;
 - **se termină pe o idee închisă**: concluzie, punchline, sfat. Nu în mijlocul unei fraze;
 - e **diferit** de celelalte clipuri alese.
+
+Evită fragmentele care se sprijină pe cifre (prețuri, procente, sume): transcrierea greșește des numerele, iar o cifră greșită în subtitrare schimbă ce a spus omul. La interviuri politice sau declarații despre persoane reale, păstrează sensul: nu tăia o frază astfel încât să pară că spune altceva.
 
 Pune `start` la începutul segmentului cu cârligul și `end` la sfârșitul frazei care închide ideea. Scriptul taie singur pauzele, așa că ținta e 30–70 s din sursă.
 
@@ -70,10 +72,18 @@ Scrie `work/clips.json`:
 ```
 `hook` e textul afișat sus în primele 3 s: maximum ~35 de caractere, fără emoji (fontul nu le are). `crop_x` mută cadrul vertical (0 = stânga, 1 = dreapta) când vorbitorul nu e la centru. Ca să afli unde e, extrage un cadru (`ffmpeg -ss <t> -i sursa.mp4 -frames:v 1 f.png`) și uită-te la el.
 
+### A2b. Retranscriere fină a fragmentelor alese
+Transcrierea completă cu `small` e rapidă, dar greșește cuvinte. Refă doar fragmentele alese cu modelul `medium`; durează câteva minute și dă subtitrări vizibil mai curate:
+```bash
+python3 $SKILL_DIR/scripts/refine.py sursa.mp4 work/transcript.json work/clips.json work/transcript_refined.json
+```
+Citește textul afișat. Dacă mai rămân greșeli, corectează-le prin `fixes`, aplicate pe cuvântul deja lipit (ex. `"ne-au": "n-au"`). Ce nu se poate rezolva prin `fixes`, cum ar fi două cuvinte care trebuie unite, corectezi direct în `transcript_refined.json`. Apoi montezi din `transcript_refined.json`.
+
 ### A3. Montaj
 ```bash
-python3 $SKILL_DIR/scripts/render.py sursa.mp4 work/transcript.json work/clips.json out/
+python3 $SKILL_DIR/scripts/render.py sursa.mp4 work/transcript_refined.json work/clips.json out/
 ```
+Încadrarea `auto` alege singură: pentru o sursă orizontală la rezoluție mică (sub 900 px înălțime) folosește **square**, adică un pătrat pe vorbitor peste fundal estompat, cu titlul deasupra și subtitrările dedesubt. Un crop 9:16 dintr-o sursă de 360p ar mări imaginea de 5 ori și ar ieși neclar. Pentru surse HD folosește crop vertical. Scriptul unește singur cuvintele despărțite la cratimă („n” + „-au”) și trece ş/ţ cu sedilă la ș/ț cu virgulă.
 Pentru fiecare clip, scriptul taie, elimină pauzele, reîncadrează la 1080×1920, arde subtitrările dinamice și normalizează sunetul la -14 LUFS. Rezultatul: `out/reel_01.mp4`, … și `out/render_report.json`. Opțiuni utile: `--reframe blur`, `--gap 0.6` (tăieturi mai blânde), `--no-jumpcut`, `--words-per-line 2`, `--font-size 96`, `--highlight "&H0000FF00&"` (verde; culorile ASS sunt `&HBBGGRR&`).
 
 ### A4. Control de calitate (automat, fără să întrebi)
@@ -91,6 +101,8 @@ Când localul nu merge (lipsă rețea sau ffmpeg) sau utilizatorul cere explicit
 3. Alege cele mai bune N clipuri după aceleași criterii. Clipurile vin deja găzduite, deci la pasul 3 de mai jos folosești `vidiq_video_upload` cu `url`.
 
 ## 3. Drafturi pentru Facebook
+**Drepturi:** dacă nu reiese clar că video-ul e al utilizatorului (de exemplu e un podcast, o emisiune sau un interviu al altcuiva), întreabă o dată, la începutul fluxului: „Ai drepturi asupra acestui video?” Dacă răspunsul e nu, montajul se face oricum, iar reels-urile se livrează ca fișiere MP4, dar nu se fac drafturi și nu se publică nimic.
+
 Pentru fiecare reel:
 1. **Încărcare:** `vidiq_video_upload` cu `localFile` (`path` absolut, `sizeBytes` din `wc -c`, `contentType: "video/mp4"`). Rulează comanda primită, apoi apelează din nou cu `uploadId` până e gata.
 2. **Text (în română, în tonul vorbitorului):**
